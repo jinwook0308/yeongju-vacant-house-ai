@@ -1403,11 +1403,21 @@ function requireLogin() {
  */
 function getRootPath() {
   const path = window.location.pathname;
-  const segments = path.split('/').filter(Boolean);
-  if (segments.length <= 1) {
-    return './';
+
+  if (window.location.hostname.includes('github.io')) {
+    return '/yeongju-vacant-house-ai/';
   }
-  return '../'.repeat(segments.length - 1);
+
+  if (path.includes('/home/')) return '../';
+  if (path.includes('/guest/')) return '../';
+  if (path.includes('/auth/')) return '../';
+  if (path.includes('/admin/')) return '../';
+  if (path.includes('/owner/')) return '../';
+  if (path.includes('/vendor/')) return '../';
+  if (path.includes('/legal/')) return '../';
+  if (path.includes('/community/')) return '../';
+
+  return './';
 }
 
 function getNotificationSectionHref(user = getCurrentUser()) {
