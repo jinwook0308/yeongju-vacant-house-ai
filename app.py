@@ -441,6 +441,30 @@ def _normalize_admin_role_value(admin_role: str | None, fallback: str = "reviewe
     return normalized
 
 
+def _is_first_admin_account(db: Session, exclude_user_id: int | None = None) -> bool:
+    query = select(User.id).where(User.role == "admin")
+    if exclude_user_id is not None:
+        query = query.where(User.id != exclude_user_id)
+    existing_admin_id = db.execute(query.limit(1)).scalar_one_or_none()
+    return existing_admin_id is None
+
+
+def _promote_first_admin_if_needed(user: User, db: Session) -> bool:
+    if user.role != "admin" or user.status != "active":
+        return False
+
+    current_admin_role = _normalize_admin_role_value(user.admin_role, fallback="reviewer")
+    if current_admin_role in {"super_admin", "system_admin"}:
+        return False
+    if not _is_first_admin_account(db, exclude_user_id=user.id):
+        return False
+
+    user.admin_role = "super_admin"
+    user.org_code_verified = True
+    db.add(user)
+    return True
+
+
 def _serialize_user(user: User) -> dict[str, Any]:
     admin_role = None
     admin_role_label = None
@@ -2506,7 +2530,7 @@ def signup(payload: SignupRequest, db: Session = Depends(get_db)) -> dict[str, A
             raise HTTPException(status_code=400, detail="기관 코드를 입력해 주세요.")
         org_code_verified = True
         user_status = "active"
-        admin_role = "reviewer"
+        admin_role = "super_admin" if _is_first_admin_account(db) else "reviewer"
         department = (payload.adminDept or "").strip() or None
 
     user = User(
@@ -2549,6 +2573,10 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> dict[str, Any
     if user.role == "admin" and user.status == "pending_approval":
         user.status = "active"
         db.add(user)
+        db.commit()
+        db.refresh(user)
+
+    if _promote_first_admin_if_needed(user, db):
         db.commit()
         db.refresh(user)
 
