@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: yeongju-vacant-house-ai
+    name: yeongju-vacant-house-ai-jinwook
     env: python
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips='*'
