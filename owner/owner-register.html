@@ -267,10 +267,11 @@
               <div class="photo-upload-area" id="photoUploadArea" role="button" tabindex="0" aria-controls="housePhotoInput" aria-label="빈집 사진 업로드">
                 <div class="photo-upload-area__icon">📷</div>
                 <p>빈집 사진을 업로드해주세요</p>
-                <p style="font-size:var(--font-size-xs);color:var(--color-text-muted);">JPG, PNG · 최대 10장 · 각 10MB 이하</p>
+                <p style="font-size:var(--font-size-xs);color:var(--color-text-muted);">JPG, PNG · 최대 5장 · 각 10MB 이하 · 여러 번 선택 가능</p>
                 <label class="btn btn--ghost btn--sm" for="housePhotoInput">파일 선택</label>
                 <input type="file" id="housePhotoInput" accept="image/png,image/jpeg,image/webp" multiple hidden>
               </div>
+              <div class="photo-selection-meta" id="photoSelectionMeta" aria-live="polite"></div>
               <div class="photo-preview-grid" id="photoPreviewGrid" aria-live="polite"></div>
             </div>
           </div>
