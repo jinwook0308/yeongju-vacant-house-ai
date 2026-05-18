@@ -8,6 +8,8 @@ const TOTAL_STEPS = 5;
 let selectedHousePhotos = [];
 let ownerRegistrationLocked = false;
 const OWNER_REGISTRATION_LIMIT_FALLBACK = 3;
+const OWNER_PHOTO_LIMIT = 5;
+const OWNER_PHOTO_MAX_SIZE = 10 * 1024 * 1024;
 
 window.addEventListener('load', function () {
   renderHeader('register');
@@ -69,7 +71,7 @@ function setupAreaConversion() {
   });
 }
 
-function setupPhotoUpload() {
+function setupPhotoUploadLegacy() {
   const input = document.getElementById('housePhotoInput');
   const grid = document.getElementById('photoPreviewGrid');
   const area = document.getElementById('photoUploadArea');
@@ -195,7 +197,7 @@ function readFileAsDataUrl(file) {
   });
 }
 
-function renderPhotoPreviews() {
+function renderPhotoPreviewsLegacy() {
   const grid = document.getElementById('photoPreviewGrid');
   if (!grid) return;
 
@@ -210,6 +212,124 @@ function renderPhotoPreviews() {
 /**
  * 영주시 읍면동 선택 옵션을 채웁니다.
  */
+function buildPhotoKey(photo) {
+  return [photo?.name || '', photo?.size || 0, photo?.type || '', photo?.lastModified || 0].join('::');
+}
+
+function renderPhotoSelectionMeta() {
+  const meta = document.getElementById('photoSelectionMeta');
+  if (!meta) return;
+
+  if (selectedHousePhotos.length === 0) {
+    meta.textContent = `사진은 최대 ${OWNER_PHOTO_LIMIT}장까지 등록할 수 있습니다. 여러 번 나눠서 선택해도 누적됩니다.`;
+    return;
+  }
+
+  meta.textContent = `선택된 사진 ${selectedHousePhotos.length}/${OWNER_PHOTO_LIMIT}장`;
+}
+
+function setupPhotoUpload() {
+  const input = document.getElementById('housePhotoInput');
+  const grid = document.getElementById('photoPreviewGrid');
+  const area = document.getElementById('photoUploadArea');
+  if (!input || !grid || !area) return;
+
+  const openFilePicker = () => {
+    input.click();
+  };
+
+  area.addEventListener('click', (event) => {
+    if (event.target.closest('label[for="housePhotoInput"]') || event.target.closest('#housePhotoInput')) {
+      return;
+    }
+    openFilePicker();
+  });
+
+  area.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    if (event.target.closest('label[for="housePhotoInput"]') || event.target.closest('#housePhotoInput')) {
+      return;
+    }
+    event.preventDefault();
+    openFilePicker();
+  });
+
+  input.addEventListener('change', async () => {
+    const files = Array.from(input.files || []);
+    const existingPhotoKeys = new Set(selectedHousePhotos.map(buildPhotoKey));
+    let skippedByLimit = 0;
+
+    for (const file of files) {
+      if (!file.type.startsWith('image/')) continue;
+
+      if (file.size > OWNER_PHOTO_MAX_SIZE) {
+        showToast(`${file.name}은 10MB를 초과해 제외되었습니다.`, 'warning');
+        continue;
+      }
+
+      const photoKey = buildPhotoKey(file);
+      if (existingPhotoKeys.has(photoKey)) {
+        continue;
+      }
+
+      if (selectedHousePhotos.length >= OWNER_PHOTO_LIMIT) {
+        skippedByLimit += 1;
+        continue;
+      }
+
+      const dataUrl = await readFileAsDataUrl(file);
+      selectedHousePhotos.push({
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        lastModified: file.lastModified || 0,
+        dataUrl,
+      });
+      existingPhotoKeys.add(photoKey);
+    }
+
+    if (skippedByLimit > 0) {
+      showToast(`사진은 최대 ${OWNER_PHOTO_LIMIT}장까지 등록할 수 있습니다.`, 'warning');
+    }
+
+    input.value = '';
+    renderPhotoPreviews();
+  });
+
+  grid.addEventListener('click', (event) => {
+    const removeButton = event.target.closest('[data-photo-remove-index]');
+    if (!removeButton) return;
+
+    const index = Number(removeButton.dataset.photoRemoveIndex);
+    if (!Number.isInteger(index) || index < 0 || index >= selectedHousePhotos.length) return;
+
+    selectedHousePhotos.splice(index, 1);
+    renderPhotoPreviews();
+  });
+
+  renderPhotoPreviews();
+}
+
+function renderPhotoPreviews() {
+  const grid = document.getElementById('photoPreviewGrid');
+  if (!grid) return;
+
+  renderPhotoSelectionMeta();
+
+  if (!selectedHousePhotos.length) {
+    grid.innerHTML = '';
+    return;
+  }
+
+  grid.innerHTML = selectedHousePhotos.map((photo, index) => `
+    <div class="photo-preview-card">
+      <img src="${photo.dataUrl}" alt="${photo.name}">
+      <button type="button" class="photo-preview-card__remove" data-photo-remove-index="${index}" aria-label="${photo.name} 삭제">×</button>
+      <span>${photo.name}</span>
+    </div>
+  `).join('');
+}
+
 function populateDistrictSelect() {
   const select = document.getElementById('houseDistrict');
   if (!select) return;
