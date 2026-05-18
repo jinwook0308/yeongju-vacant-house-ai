@@ -203,8 +203,24 @@ except Exception:
 
 CSV_PATH = os.path.join(PY_DIR, "yeongju_houses.csv")
 XLSX_PATH = os.path.join(PY_DIR, "yeongju_houses.xlsx")
-DB_PATH = os.path.join(BASE_DIR, "yeongju_houses.db")
-DB_URL = os.getenv("DB_URL", f"sqlite:///{DB_PATH}")
+
+
+def _resolve_database_url() -> str:
+    configured_db_url = (os.getenv("DB_URL") or "").strip()
+    if configured_db_url:
+        # Render Postgres commonly provides postgres:// URLs, but SQLAlchemy expects postgresql://.
+        if configured_db_url.startswith("postgres://"):
+            return "postgresql://" + configured_db_url[len("postgres://"):]
+        return configured_db_url
+
+    sqlite_path = (os.getenv("SQLITE_PATH") or os.path.join(BASE_DIR, "yeongju_houses.db")).strip()
+    sqlite_dir = os.path.dirname(sqlite_path)
+    if sqlite_dir:
+        os.makedirs(sqlite_dir, exist_ok=True)
+    return f"sqlite:///{sqlite_path}"
+
+
+DB_URL = _resolve_database_url()
 
 KAKAO_API_KEY = os.getenv("KAKAO_REST_API_KEY", "")
 KAKAO_BASE_URL = "https://dapi.kakao.com/v2/local/search"

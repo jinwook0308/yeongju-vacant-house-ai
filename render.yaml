@@ -1,11 +1,15 @@
 services:
   - type: web
     name: yeongju-vacant-house-ai-jinwook
-    env: python
+    runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips='*'
     envVars:
+      - key: DB_URL
+        fromDatabase:
+          name: yeongju-vacant-house-ai-db
+          property: connectionString
       - key: PYTHON_VERSION
         value: 3.12.10
       - key: KAKAO_CLIENT_ID
@@ -22,3 +26,6 @@ services:
         sync: false
       - key: YEONGJU_PUBLIC_BASE_URL
         sync: false
+databases:
+  - name: yeongju-vacant-house-ai-db
+    plan: free
