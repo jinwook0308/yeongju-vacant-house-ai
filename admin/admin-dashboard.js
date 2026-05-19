@@ -16,6 +16,7 @@ async function initAdminDashboard() {
   renderFooter();
 
   if (!requireAdminLogin()) return;
+  await awaitPlatformDataReady();
   if (typeof syncAdminManagementNavigation === 'function') {
     syncAdminManagementNavigation();
   }

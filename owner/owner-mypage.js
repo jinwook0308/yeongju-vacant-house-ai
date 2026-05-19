@@ -1,4 +1,4 @@
-window.addEventListener('load', function () {
+window.addEventListener('load', async function () {
   renderHeader('');
   renderFooter();
 
@@ -7,6 +7,8 @@ window.addEventListener('load', function () {
     renderAccessDenied();
     return;
   }
+
+  await awaitPlatformDataReady();
 
   renderOwnerDashboard();
   bindOwnerBookingActions();

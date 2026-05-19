@@ -5,11 +5,12 @@
 
 let currentStatusFilter = 'all';
 
-window.addEventListener('load', function () {
+window.addEventListener('load', async function () {
   renderHeader('');
   renderFooter();
 
   if (!requireLogin()) return;
+  await awaitPlatformDataReady();
 
   setupStatusFilterTabs();
   renderRequestsList('all');

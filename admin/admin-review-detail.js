@@ -5,9 +5,11 @@
 
 let currentRequest = null;
 
-window.addEventListener('load', function () {
+window.addEventListener('load', async function () {
   renderHeader('admin');
   renderFooter();
+
+  await awaitPlatformDataReady();
 
   requestAnimationFrame(function () {
     if (!requireAdminLogin()) return;
@@ -431,13 +433,28 @@ function renderSameDistrictRequests(request) {
   }).join('');
 }
 
-function startReviewFromDetail() {
+async function startReviewFromDetail() {
   if (!currentRequest) return;
   const confirmed = confirm('이 신청을 담당하시겠습니까?\n담당자로 배정되면 다른 사용자는 읽기 전용으로 전환됩니다.');
   if (!confirmed) return;
 
   try {
-    currentRequest = startReviewRequest(currentRequest.id);
+    currentRequest = typeof updateRegistrationRequestRemote === 'function'
+      ? await updateRegistrationRequestRemote(currentRequest.id, {
+        assignedReviewerId: getCurrentUser()?.id || '',
+        assignedReviewerName: getCurrentUser()?.name || '',
+        assignedReviewerRole: getAdminRole(getCurrentUser()),
+        lockedById: getCurrentUser()?.id || '',
+        lockedByName: getCurrentUser()?.name || '',
+        lockedByRole: getAdminRole(getCurrentUser()),
+        lockedAt: new Date().toISOString(),
+        reviewStatus: currentRequest.reviewStatus === 'submitted' ? 'under_review' : currentRequest.reviewStatus,
+      }, {
+        actor: getCurrentUser(),
+        expectedVersion: currentRequest.version,
+        historyAction: currentRequest.assignedReviewerId ? 'reassign' : 'review_start',
+      })
+      : startReviewRequest(currentRequest.id);
     showToast('검토 시작과 담당자 배정이 완료되었습니다.', 'success');
     renderReviewDetail(currentRequest);
   } catch (error) {
@@ -445,13 +462,28 @@ function startReviewFromDetail() {
   }
 }
 
-function takeOverReviewFromDetail() {
+async function takeOverReviewFromDetail() {
   if (!currentRequest) return;
   const confirmed = confirm('현재 잠긴 담당 건을 내 담당으로 재배정하시겠습니까?');
   if (!confirmed) return;
 
   try {
-    currentRequest = startReviewRequest(currentRequest.id);
+    currentRequest = typeof updateRegistrationRequestRemote === 'function'
+      ? await updateRegistrationRequestRemote(currentRequest.id, {
+        assignedReviewerId: getCurrentUser()?.id || '',
+        assignedReviewerName: getCurrentUser()?.name || '',
+        assignedReviewerRole: getAdminRole(getCurrentUser()),
+        lockedById: getCurrentUser()?.id || '',
+        lockedByName: getCurrentUser()?.name || '',
+        lockedByRole: getAdminRole(getCurrentUser()),
+        lockedAt: new Date().toISOString(),
+        reviewStatus: currentRequest.reviewStatus === 'submitted' ? 'under_review' : currentRequest.reviewStatus,
+      }, {
+        actor: getCurrentUser(),
+        expectedVersion: currentRequest.version,
+        historyAction: currentRequest.assignedReviewerId ? 'reassign' : 'review_start',
+      })
+      : startReviewRequest(currentRequest.id);
     showToast('내 담당 건으로 재배정되었습니다.', 'success');
     renderReviewDetail(currentRequest);
   } catch (error) {
@@ -459,13 +491,27 @@ function takeOverReviewFromDetail() {
   }
 }
 
-function unlockReviewFromDetail() {
+async function unlockReviewFromDetail() {
   if (!currentRequest) return;
   const confirmed = confirm('이 신청의 잠금을 해제하고 미배정 상태로 되돌리시겠습니까?');
   if (!confirmed) return;
 
   try {
-    currentRequest = unlockReviewRequest(currentRequest.id);
+    currentRequest = typeof updateRegistrationRequestRemote === 'function'
+      ? await updateRegistrationRequestRemote(currentRequest.id, {
+        assignedReviewerId: '',
+        assignedReviewerName: '',
+        assignedReviewerRole: '',
+        lockedById: '',
+        lockedByName: '',
+        lockedByRole: '',
+        lockedAt: '',
+      }, {
+        actor: getCurrentUser(),
+        expectedVersion: currentRequest.version,
+        historyAction: 'unlock',
+      })
+      : unlockReviewRequest(currentRequest.id);
     showToast('잠금이 해제되었습니다.', 'success');
     renderReviewDetail(currentRequest);
   } catch (error) {
@@ -473,7 +519,7 @@ function unlockReviewFromDetail() {
   }
 }
 
-function changeStatus() {
+async function changeStatus() {
   if (!currentRequest) return;
   const nextStatus = document.getElementById('statusChangeSelect')?.value;
   if (!nextStatus) {
@@ -482,7 +528,14 @@ function changeStatus() {
   }
 
   try {
-    currentRequest = updateRegistrationRequest(currentRequest.id, {
+    currentRequest = typeof updateRegistrationRequestRemote === 'function'
+      ? await updateRegistrationRequestRemote(currentRequest.id, {
+        reviewStatus: nextStatus,
+      }, {
+        expectedVersion: currentRequest.version,
+        historyAction: 'status_change',
+      })
+      : updateRegistrationRequest(currentRequest.id, {
       reviewStatus: nextStatus,
     }, {
       expectedVersion: currentRequest.version,
@@ -495,13 +548,32 @@ function changeStatus() {
   }
 }
 
-function submitForApproval() {
+async function submitForApproval() {
   if (!currentRequest) return;
   const confirmed = confirm('이 신청을 승인 담당자 결재 대기로 전달하시겠습니까?');
   if (!confirmed) return;
 
   try {
-    currentRequest = submitReviewForApproval(currentRequest.id);
+    currentRequest = typeof updateRegistrationRequestRemote === 'function'
+      ? await updateRegistrationRequestRemote(currentRequest.id, {
+        reviewStatus: APPROVAL_PENDING_STATUS,
+        reviewCompletedById: getCurrentUser()?.id || '',
+        reviewCompletedByName: getCurrentUser()?.name || '',
+        reviewCompletedByRole: getAdminRole(getCurrentUser()),
+        reviewCompletedAt: new Date().toISOString(),
+        assignedReviewerId: '',
+        assignedReviewerName: '',
+        assignedReviewerRole: '',
+        lockedById: '',
+        lockedByName: '',
+        lockedByRole: '',
+        lockedAt: '',
+      }, {
+        actor: getCurrentUser(),
+        expectedVersion: currentRequest.version,
+        historyAction: 'submit_for_approval',
+      })
+      : submitReviewForApproval(currentRequest.id);
     showToast('승인 담당자 결재 대기로 전달했습니다.', 'success');
     renderReviewDetail(currentRequest);
   } catch (error) {
@@ -509,12 +581,19 @@ function submitForApproval() {
   }
 }
 
-function saveInternalReviewNote() {
+async function saveInternalReviewNote() {
   if (!currentRequest) return;
   const note = document.getElementById('internalReviewNote')?.value.trim() || '';
 
   try {
-    currentRequest = updateRegistrationRequest(currentRequest.id, {
+    currentRequest = typeof updateRegistrationRequestRemote === 'function'
+      ? await updateRegistrationRequestRemote(currentRequest.id, {
+        internalReviewNote: note,
+      }, {
+        expectedVersion: currentRequest.version,
+        historyAction: 'note',
+      })
+      : updateRegistrationRequest(currentRequest.id, {
       internalReviewNote: note,
     }, {
       expectedVersion: currentRequest.version,
@@ -527,7 +606,7 @@ function saveInternalReviewNote() {
   }
 }
 
-function submitApproval() {
+async function submitApproval() {
   if (!currentRequest) return;
 
   const grade = document.getElementById('approveGrade').value;
@@ -536,7 +615,18 @@ function submitApproval() {
   const makePublic = document.getElementById('approvePublic').checked;
 
   try {
-    currentRequest = updateRegistrationRequest(currentRequest.id, {
+    currentRequest = typeof updateRegistrationRequestRemote === 'function'
+      ? await updateRegistrationRequestRemote(currentRequest.id, {
+        reviewStatus: 'approved',
+        reviewComment: comment || '?뱀씤 泥섎━',
+        conditionGrade: grade,
+        operationType,
+        makePublic,
+      }, {
+        expectedVersion: currentRequest.version,
+        historyAction: 'approve',
+      })
+      : updateRegistrationRequest(currentRequest.id, {
       reviewStatus: 'approved',
       reviewComment: comment || '승인 처리',
       conditionGrade: grade,
@@ -555,7 +645,7 @@ function submitApproval() {
   }
 }
 
-function submitRejection() {
+async function submitRejection() {
   if (!currentRequest) return;
 
   const reason = document.getElementById('rejectReason').value;
@@ -566,7 +656,16 @@ function submitRejection() {
   }
 
   try {
-    currentRequest = updateRegistrationRequest(currentRequest.id, {
+    currentRequest = typeof updateRegistrationRequestRemote === 'function'
+      ? await updateRegistrationRequestRemote(currentRequest.id, {
+        reviewStatus: 'rejected',
+        reviewComment: comment || reason,
+        rejectReason: reason,
+      }, {
+        expectedVersion: currentRequest.version,
+        historyAction: 'reject',
+      })
+      : updateRegistrationRequest(currentRequest.id, {
       reviewStatus: 'rejected',
       reviewComment: comment || reason,
       rejectReason: reason,
