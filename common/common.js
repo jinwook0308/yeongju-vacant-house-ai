@@ -268,6 +268,44 @@ function writeJsonStorage(key, value) {
   localStorage.setItem(key, JSON.stringify(value));
 }
 
+function replaceRegistrationRequestsCache(requests) {
+  const normalized = Array.isArray(requests)
+    ? requests.map((request) => normalizeRegistrationWorkflow({ ...request }))
+    : [];
+  writeJsonStorage(PLATFORM_REQUESTS_KEY, normalized);
+  return normalized;
+}
+
+async function fetchRegistrationRequestsFromServer() {
+  const response = await fetch(`${getApiBaseUrl()}/registration-requests`);
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+
+  const data = await response.json();
+  return Array.isArray(data) ? data : [];
+}
+
+async function syncPlatformDataFromServer({ emit = true, silent = false } = {}) {
+  try {
+    const requests = await fetchRegistrationRequestsFromServer();
+    replaceRegistrationRequestsCache(requests);
+    if (emit) {
+      emitPlatformDataChanged({ type: 'registration-request-sync', requests });
+    }
+    return requests;
+  } catch (error) {
+    if (!silent) {
+      console.warn('서버 등록 요청 동기화에 실패했습니다.', error);
+    }
+    return getStoredRegistrationRequests();
+  }
+}
+
+function awaitPlatformDataReady() {
+  return window.__YEONGJU_PLATFORM_DATA_READY__ || Promise.resolve([]);
+}
+
 function getBaseRegistrationRequests() {
   if (typeof REGISTRATION_REQUESTS !== 'undefined' && Array.isArray(REGISTRATION_REQUESTS)) {
     return REGISTRATION_REQUESTS.map(request => ({ ...request }));
@@ -534,6 +572,38 @@ function saveRegistrationRequest(request) {
   return normalizeRegistrationWorkflow(normalized);
 }
 
+async function saveRegistrationRequestRemote(request) {
+  const localSaved = saveRegistrationRequest(request);
+
+  try {
+    const response = await fetch(`${getApiBaseUrl()}/registration-requests`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ request: localSaved }),
+    });
+
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.detail || `HTTP ${response.status}`);
+    }
+
+    const saved = await response.json();
+    const requests = getStoredRegistrationRequests();
+    const index = requests.findIndex((item) => String(item.id) === String(saved.id));
+    if (index >= 0) {
+      requests[index] = normalizeRegistrationWorkflow(saved);
+    } else {
+      requests.unshift(normalizeRegistrationWorkflow(saved));
+    }
+    writeJsonStorage(PLATFORM_REQUESTS_KEY, requests);
+    emitPlatformDataChanged({ type: 'registration-request', request: saved });
+    return normalizeRegistrationWorkflow(saved);
+  } catch (error) {
+    await syncPlatformDataFromServer({ silent: true });
+    throw error;
+  }
+}
+
 function updateRegistrationRequest(requestId, updates = {}, options = {}) {
   const all = getAllRegistrationRequests();
   const target = all.find(item => String(item.id) === String(requestId));
@@ -621,6 +691,47 @@ function updateRegistrationRequest(requestId, updates = {}, options = {}) {
 
   emitPlatformDataChanged({ type: 'registration-request-update', request: updated });
   return updated;
+}
+
+async function updateRegistrationRequestRemote(requestId, updates = {}, options = {}) {
+  const localUpdated = updateRegistrationRequest(requestId, updates, options);
+
+  try {
+    const response = await fetch(`${getApiBaseUrl()}/registration-requests/${encodeURIComponent(requestId)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ request: localUpdated }),
+    });
+
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      const error = new Error(data.detail || `HTTP ${response.status}`);
+      if (response.status === 409) {
+        error.code = 'VERSION_MISMATCH';
+      }
+      throw error;
+    }
+
+    const saved = normalizeRegistrationWorkflow(await response.json());
+    const stored = getStoredRegistrationRequests();
+    const index = stored.findIndex((item) => String(item.id) === String(saved.id));
+    if (index >= 0) {
+      stored[index] = saved;
+    } else {
+      stored.unshift(saved);
+    }
+    writeJsonStorage(PLATFORM_REQUESTS_KEY, stored);
+    emitPlatformDataChanged({ type: 'registration-request-update', request: saved });
+    return saved;
+  } catch (error) {
+    const latest = await syncPlatformDataFromServer({ emit: false, silent: true });
+    if (error?.code === 'VERSION_MISMATCH') {
+      error.currentRequest = Array.isArray(latest)
+        ? latest.find((item) => String(item.id) === String(requestId)) || null
+        : null;
+    }
+    throw error;
+  }
 }
 
 function startReviewRequest(requestId, user = getCurrentUser()) {
@@ -1312,6 +1423,8 @@ function getApiBaseUrl() {
 
   return origin.replace(/\/$/, '');
 }
+
+window.__YEONGJU_PLATFORM_DATA_READY__ = syncPlatformDataFromServer({ emit: false, silent: true });
 
 async function withdrawCurrentUser() {
   const user = getCurrentUser();

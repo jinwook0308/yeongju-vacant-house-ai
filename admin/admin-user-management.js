@@ -7,8 +7,9 @@ window.addEventListener('load', function () {
   renderHeader('admin');
   renderFooter();
 
-  requestAnimationFrame(function () {
+  requestAnimationFrame(async function () {
     if (!requireAdminLogin()) return;
+    await awaitPlatformDataReady();
     if (typeof syncAdminManagementNavigation === 'function') {
       syncAdminManagementNavigation();
     }

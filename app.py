@@ -22,7 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint, create_engine, inspect, select, text
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, create_engine, inspect, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 
@@ -354,6 +354,16 @@ class SocialAccount(Base):
     last_login_at = Column(DateTime, nullable=True)
 
 
+class RegistrationRequestRecord(Base):
+    __tablename__ = "registration_requests"
+
+    id = Column(Integer, primary_key=True, index=True)
+    request_id = Column(String(100), nullable=False, unique=True, index=True)
+    payload_json = Column(Text, nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 # =========================================================
 # DB 초기화 / 세션
 # =========================================================
@@ -361,6 +371,7 @@ def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     _ensure_house_schema()
     _ensure_user_schema()
+    _ensure_registration_request_schema()
 
 
 def _ensure_house_schema() -> None:
@@ -423,6 +434,28 @@ def _ensure_user_schema() -> None:
         )
 
 
+def _ensure_registration_request_schema() -> None:
+    inspector = inspect(engine)
+    if not inspector.has_table("registration_requests"):
+        return
+
+    columns = {column["name"] for column in inspector.get_columns("registration_requests")}
+    statements: list[str] = []
+
+    if "request_id" not in columns:
+        statements.append("ALTER TABLE registration_requests ADD COLUMN request_id VARCHAR(100)")
+    if "payload_json" not in columns:
+        statements.append("ALTER TABLE registration_requests ADD COLUMN payload_json TEXT")
+    if "created_at" not in columns:
+        statements.append("ALTER TABLE registration_requests ADD COLUMN created_at DATETIME")
+    if "updated_at" not in columns:
+        statements.append("ALTER TABLE registration_requests ADD COLUMN updated_at DATETIME")
+
+    with engine.begin() as connection:
+        for statement in statements:
+            connection.execute(text(statement))
+
+
 def get_db():
     db = SessionLocal()
     try:
@@ -436,6 +469,198 @@ def get_db():
 # =========================================================
 def _normalize_email(email: str) -> str:
     return (email or "").strip().lower()
+
+
+def _normalize_registration_request_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(payload or {})
+    version = normalized.get("version")
+    try:
+        version_value = int(version)
+    except (TypeError, ValueError):
+        version_value = 1
+
+    normalized["version"] = version_value if version_value > 0 else 1
+    normalized["assignedReviewerId"] = normalized.get("assignedReviewerId") or ""
+    normalized["assignedReviewerName"] = normalized.get("assignedReviewerName") or ""
+    normalized["assignedReviewerRole"] = normalized.get("assignedReviewerRole") or ""
+    normalized["lockedById"] = normalized.get("lockedById") or ""
+    normalized["lockedByName"] = normalized.get("lockedByName") or ""
+    normalized["lockedByRole"] = normalized.get("lockedByRole") or ""
+    normalized["lockedAt"] = normalized.get("lockedAt") or ""
+    normalized["internalReviewNote"] = normalized.get("internalReviewNote") or ""
+    normalized["reviewCompletedById"] = normalized.get("reviewCompletedById") or ""
+    normalized["reviewCompletedByName"] = normalized.get("reviewCompletedByName") or ""
+    normalized["reviewCompletedByRole"] = normalized.get("reviewCompletedByRole") or ""
+    normalized["reviewCompletedAt"] = normalized.get("reviewCompletedAt") or ""
+    normalized["reviewStatus"] = normalized.get("reviewStatus") or "submitted"
+    normalized["submittedAt"] = normalized.get("submittedAt") or datetime.utcnow().date().isoformat()
+    normalized["updatedAt"] = normalized.get("updatedAt") or datetime.utcnow().isoformat()
+
+    review_history = normalized.get("reviewHistory")
+    if not isinstance(review_history, list) or not review_history:
+        normalized["reviewHistory"] = [{
+            "id": f"history-{normalized.get('id', 'request')}-submitted",
+            "action": "submitted",
+            "at": normalized["submittedAt"],
+            "actorId": str(normalized.get("ownerUserId") or ""),
+            "actorName": normalized.get("ownerName") or "요청자",
+            "actorRole": "owner",
+            "fromStatus": "",
+            "toStatus": normalized["reviewStatus"],
+            "note": "등록 요청 접수",
+        }]
+
+    return normalized
+
+
+def _serialize_registration_request_record(record: RegistrationRequestRecord) -> dict[str, Any]:
+    try:
+        payload = json.loads(record.payload_json or "{}")
+    except json.JSONDecodeError:
+        payload = {}
+
+    normalized = _normalize_registration_request_payload(payload)
+    normalized["id"] = normalized.get("id") or record.request_id
+    return normalized
+
+
+def _extract_request_photo_urls(payload: dict[str, Any]) -> list[str]:
+    photos = payload.get("photos")
+    if not isinstance(photos, list):
+        return []
+
+    result: list[str] = []
+    for photo in photos:
+        if isinstance(photo, str) and photo.strip():
+            result.append(photo.strip())
+            continue
+        if not isinstance(photo, dict):
+            continue
+
+        for key in ("dataUrl", "url", "src"):
+            value = str(photo.get(key) or "").strip()
+            if value:
+                result.append(value)
+                break
+
+    return result
+
+
+def _registration_operation_type(payload: dict[str, Any]) -> str:
+    operation_type = str(payload.get("operationType") or "").strip()
+    if operation_type:
+        return operation_type
+
+    usage_types = payload.get("usageTypes")
+    usage_text = ""
+    if isinstance(usage_types, list):
+        usage_text = " ".join(str(item) for item in usage_types)
+    else:
+        usage_text = str(usage_types or "")
+    usage_text = usage_text.lower()
+
+    if "longterm" in usage_text or "장기" in usage_text:
+        return "longterm"
+    if "experience" in usage_text or "체험" in usage_text or "커뮤니티" in usage_text:
+        return "experience"
+    return "lodging"
+
+
+def _registration_virtual_house_number(record_id: int) -> int:
+    return 9_000_000 + int(record_id)
+
+
+def _coerce_int(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _coerce_float(value: Any, default: float | None = None) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _serialize_approved_house_from_request(
+    request_payload: dict[str, Any],
+    record_id: int,
+) -> dict[str, Any]:
+    normalized = _normalize_registration_request_payload(request_payload)
+    district_name = str(normalized.get("districtName") or "").strip()
+    district_id = str(normalized.get("districtId") or _extract_district_id(str(normalized.get("address") or "")))
+    address = " ".join(
+        part.strip()
+        for part in [str(normalized.get("address") or ""), str(normalized.get("addressDetail") or "")]
+        if part and part.strip()
+    ).strip()
+    operation_type = _registration_operation_type(normalized)
+    usage_purpose = normalized.get("usageTypes") if isinstance(normalized.get("usageTypes"), list) else []
+    description = str(normalized.get("description") or "").strip()
+    photo_urls = _extract_request_photo_urls(normalized)
+    registered_at = str(normalized.get("submittedAt") or datetime.utcnow().date().isoformat())
+    approved_at = str(normalized.get("approvedAt") or normalized.get("updatedAt") or registered_at)
+    house_name = str(normalized.get("houseName") or "").strip()
+    generated_name = f"{district_name} 승인 빈집" if district_name else f"{normalized.get('ownerName') or '소유주'} 승인 빈집"
+    review_summary = str(normalized.get("reviewComment") or "관리자 검토를 거쳐 공개 승인된 빈집입니다.").strip()
+
+    lat = normalized.get("lat")
+    lon = normalized.get("lon")
+
+    return {
+        "id": _format_house_id(_registration_virtual_house_number(record_id)),
+        "name": house_name or generated_name,
+        "districtId": district_id,
+        "districtName": district_name or _extract_district_name(address),
+        "address": address or str(normalized.get("address") or ""),
+        "conditionGrade": str(normalized.get("conditionGrade") or "B"),
+        "reviewStatus": "approved",
+        "operationType": operation_type,
+        "isApproved": True,
+        "isVerified": True,
+        "isCleaningDone": str(normalized.get("needsCleaning") or "").lower() == "no",
+        "isRepairDone": str(normalized.get("needsRepair") or "").lower() == "no",
+        "maxCapacity": _coerce_int(normalized.get("maxCapacity") or normalized.get("capacity"), 4),
+        "availablePeriod": "일정 협의",
+        "usagePurpose": usage_purpose,
+        "facilities": normalized.get("facilities") if isinstance(normalized.get("facilities"), list) else ["관리자 확인 완료", "상세 이용 조건 협의 필요"],
+        "description": description or f"{district_name or '영주시'}에 등록된 승인 빈집입니다.",
+        "reviewSummary": review_summary,
+        "partnerVendor": None,
+        "registeredAt": registered_at,
+        "approvedAt": approved_at,
+        "image": photo_urls[0] if photo_urls else "",
+        "priceRange": str(normalized.get("priceRange") or "운영 조건 협의"),
+        "tags": [
+            item for item in [
+                district_name,
+                str(normalized.get("buildingTypeLabel") or normalized.get("buildingType") or "").strip(),
+                *[str(item).strip() for item in usage_purpose if str(item).strip()],
+            ] if item
+        ][:5],
+        "area": _coerce_float(normalized.get("buildingArea"), 0.0),
+        "status": str(normalized.get("buildingCondition") or normalized.get("status") or "승인 완료"),
+        "lat": _coerce_float(lat),
+        "lon": _coerce_float(lon),
+    }
+
+
+def _get_registration_records(db: Session) -> list[RegistrationRequestRecord]:
+    return db.query(RegistrationRequestRecord).order_by(RegistrationRequestRecord.updated_at.desc()).all()
+
+
+def _get_public_registration_houses(db: Session) -> list[dict[str, Any]]:
+    houses: list[dict[str, Any]] = []
+    for record in _get_registration_records(db):
+        payload = _serialize_registration_request_record(record)
+        if str(payload.get("reviewStatus") or "") != "approved":
+            continue
+        if payload.get("makePublic", True) is False:
+            continue
+        houses.append(_serialize_approved_house_from_request(payload, record.id))
+    return houses
 
 
 def _hash_password(password: str) -> str:
@@ -1984,6 +2209,10 @@ class HouseAnalysisOut(BaseModel):
     ai_report: str
 
 
+class RegistrationRequestSaveIn(BaseModel):
+    request: dict[str, Any]
+
+
 class AuthUserOut(BaseModel):
     id: int
     name: str
@@ -2789,16 +3018,81 @@ def social_login_callback(
         return RedirectResponse(url=_build_frontend_auth_redirect(request, error=str(exc.detail)))
 
 
+@app.get("/registration-requests")
+def get_registration_requests(db: Session = Depends(get_db)) -> list[dict[str, Any]]:
+    return [_serialize_registration_request_record(record) for record in _get_registration_records(db)]
+
+
+@app.post("/registration-requests")
+def create_registration_request(
+    body: RegistrationRequestSaveIn,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    payload = _normalize_registration_request_payload(body.request)
+    request_id = str(payload.get("id") or "").strip()
+    if not request_id:
+        raise HTTPException(status_code=400, detail="등록 요청 ID가 필요합니다.")
+
+    existing = db.execute(
+        select(RegistrationRequestRecord).where(RegistrationRequestRecord.request_id == request_id)
+    ).scalar_one_or_none()
+    if existing:
+        raise HTTPException(status_code=409, detail="이미 저장된 등록 요청입니다.")
+
+    record = RegistrationRequestRecord(
+        request_id=request_id,
+        payload_json=json.dumps(payload, ensure_ascii=False),
+    )
+    db.add(record)
+    db.commit()
+    db.refresh(record)
+    return _serialize_registration_request_record(record)
+
+
+@app.put("/registration-requests/{request_id}")
+def replace_registration_request(
+    request_id: str,
+    body: RegistrationRequestSaveIn,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    payload = _normalize_registration_request_payload(body.request)
+    payload_request_id = str(payload.get("id") or request_id).strip()
+    if payload_request_id != str(request_id).strip():
+        raise HTTPException(status_code=400, detail="요청 ID가 일치하지 않습니다.")
+
+    record = db.execute(
+        select(RegistrationRequestRecord).where(RegistrationRequestRecord.request_id == payload_request_id)
+    ).scalar_one_or_none()
+    if not record:
+        raise HTTPException(status_code=404, detail="등록 요청을 찾을 수 없습니다.")
+
+    current_payload = _serialize_registration_request_record(record)
+    current_version = int(current_payload.get("version") or 1)
+    next_version = int(payload.get("version") or 1)
+    if next_version <= current_version:
+        raise HTTPException(status_code=409, detail="다른 기기에서 더 최근 상태로 수정되었습니다.")
+
+    record.payload_json = json.dumps(payload, ensure_ascii=False)
+    record.updated_at = datetime.utcnow()
+    db.add(record)
+    db.commit()
+    db.refresh(record)
+    return _serialize_registration_request_record(record)
+
+
 @app.get("/houses", response_model=list[HouseFrontOut])
 def get_all_houses(db: Session = Depends(get_db)) -> list[dict[str, Any]]:
     houses = db.query(House).order_by(House.id.asc()).all()
-    return [_serialize_house(house) for house in houses]
+    base_houses = [_serialize_house(house) for house in houses]
+    merged: dict[str, dict[str, Any]] = {str(item["id"]): item for item in base_houses}
+    for item in _get_public_registration_houses(db):
+        merged[str(item["id"])] = item
+    return list(merged.values())
 
 
 @app.get("/site/stats", response_model=SiteStatsOut)
 def get_site_stats(db: Session = Depends(get_db)) -> dict[str, int]:
-    houses = db.query(House).order_by(House.id.asc()).all()
-    serialized_houses = [_serialize_house(house) for house in houses]
+    serialized_houses = get_all_houses(db)
     approved_count = sum(
         1
         for house in serialized_houses
@@ -2823,7 +3117,14 @@ def get_house_detail(house_id: str, db: Session = Depends(get_db)) -> dict[str, 
     real_id = _normalize_house_id(house_id)
     house = db.query(House).filter(House.id == real_id).first()
     if not house:
-        raise HTTPException(status_code=404, detail="빈집을 찾을 수 없습니다.")
+        if real_id >= 9_000_000:
+            record_id = real_id - 9_000_000
+            record = db.query(RegistrationRequestRecord).filter(RegistrationRequestRecord.id == record_id).first()
+            if record:
+                payload = _serialize_registration_request_record(record)
+                if str(payload.get("reviewStatus") or "") == "approved" and payload.get("makePublic", True) is not False:
+                    return _serialize_approved_house_from_request(payload, record.id)
+        raise HTTPException(status_code=404, detail="??? ?? ? ????.")
     return _serialize_house(house)
 
 

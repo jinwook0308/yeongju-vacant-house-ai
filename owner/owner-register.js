@@ -622,6 +622,9 @@ async function saveOwnerRegistrationRequest(usageTypes) {
     submittedAt: new Date().toISOString().split('T')[0],
   };
 
+  if (typeof saveRegistrationRequestRemote === 'function') {
+    return saveRegistrationRequestRemote(request);
+  }
   if (typeof saveRegistrationRequest === 'function') {
     return saveRegistrationRequest(request);
   }

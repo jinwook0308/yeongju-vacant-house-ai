@@ -6,9 +6,11 @@
 let currentFilters = { keyword: '', district: '', status: '', buildingType: '' };
 let currentSort = 'latest';
 
-window.addEventListener('load', function () {
+window.addEventListener('load', async function () {
   renderHeader('admin');
   renderFooter();
+
+  await awaitPlatformDataReady();
 
   requestAnimationFrame(function () {
     if (!requireAdminLogin()) return;
