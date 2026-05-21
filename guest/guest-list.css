@@ -94,12 +94,18 @@
 }
 
 .house-filter-panel__eyebrow {
+  display: inline-flex;
+  align-items: center;
   margin: 0 0 10px;
-  color: var(--guest-gold);
-  font-size: 0.76rem;
+  padding: 5px 11px;
+  border-radius: 999px;
+  color: #7f5f18;
+  font-size: 0.68rem;
   font-weight: 800;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: rgba(201, 168, 76, 0.16);
+  border: 1px solid rgba(168, 141, 82, 0.24);
+  text-transform: none;
 }
 
 .house-filter-panel__title {

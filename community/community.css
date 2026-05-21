@@ -85,7 +85,7 @@
 .community-page .site-header__actions .btn:not(.btn--primary) {
   background: rgba(255, 255, 255, 0.95);
   color: #2f2618;
-  border: 1px solid rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(92, 74, 38, 0.22) !important;
 }
 
 .community-page .site-header__user-link {
@@ -96,7 +96,7 @@
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.95);
   color: #2f2618 !important;
-  border: 1px solid rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(92, 74, 38, 0.22);
 }
 
 .community-page .site-header__user-link:hover {
@@ -303,11 +303,17 @@
 }
 
 .community-board-header__eyebrow {
-  margin: 0 0 8px;
-  color: #8a6a20;
-  font-size: 0.82rem;
+  display: inline-flex;
+  align-items: center;
+  margin: 0 0 10px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  color: #7f5f18;
+  font-size: 0.68rem;
   font-weight: 800;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.04em;
+  background: rgba(201, 168, 76, 0.16);
+  border: 1px solid rgba(168, 141, 82, 0.24);
 }
 
 .community-board-header__title {
@@ -891,7 +897,7 @@
 }
 
 .community-board-header__eyebrow {
-  color: #4b5563;
+  color: #7f5f18;
 }
 
 .community-board-header__title,
@@ -1570,8 +1576,10 @@
 }
 
 .community-board-header__eyebrow {
-  color: #6b7280 !important;
-  letter-spacing: 0.16em;
+  color: #7f5f18 !important;
+  letter-spacing: 0.04em;
+  background: rgba(201, 168, 76, 0.16) !important;
+  border: 1px solid rgba(168, 141, 82, 0.24) !important;
 }
 
 .community-board-header__title {
@@ -1786,8 +1794,10 @@
 }
 
 .community-board-header__eyebrow {
-  color: #6b7280 !important;
-  letter-spacing: 0.14em !important;
+  color: #7f5f18 !important;
+  letter-spacing: 0.04em !important;
+  background: rgba(201, 168, 76, 0.16) !important;
+  border: 1px solid rgba(168, 141, 82, 0.24) !important;
 }
 
 .community-board-header__title,
